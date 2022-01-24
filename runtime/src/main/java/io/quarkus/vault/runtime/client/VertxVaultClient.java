@@ -2,6 +2,7 @@ package io.quarkus.vault.runtime.client;
 
 import static com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES;
 import static io.quarkus.vault.runtime.client.MutinyVertxClientFactory.createHttpClient;
+import static io.quarkus.vault.runtime.config.VaultBootstrapConfig.DEFAULT_READ_TIMEOUT;
 import static java.util.Collections.emptyMap;
 
 import java.net.ConnectException;
@@ -13,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
-import java.util.function.Supplier;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Singleton;
@@ -25,9 +25,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import io.quarkus.runtime.TlsConfig;
 import io.quarkus.vault.VaultException;
-import io.quarkus.vault.runtime.VaultConfigHolder;
 import io.quarkus.vault.runtime.VaultIOException;
-import io.quarkus.vault.runtime.config.VaultBootstrapConfig;
+import io.quarkus.vault.runtime.config.VaultConfigSourceFactory;
+import io.smallrye.config.ConfigSourceContext;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.VertxException;
 import io.vertx.core.http.HttpMethod;
@@ -48,28 +48,27 @@ public class VertxVaultClient implements VaultClient {
     private final Vertx vertx;
     private URL baseUrl;
     private final TlsConfig tlsConfig;
-    private final VaultConfigHolder vaultConfigHolder;
     private WebClient webClient;
+    private ConfigSourceContext context;
 
     ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
-    public VertxVaultClient(VaultConfigHolder vaultConfigHolder, TlsConfig tlsConfig) {
-        this.vaultConfigHolder = vaultConfigHolder;
+    public VertxVaultClient(TlsConfig tlsConfig) {
         this.tlsConfig = tlsConfig;
         this.mapper.configure(FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         this.vertx = Vertx.vertx();
     }
 
-    public void init() {
-        VaultBootstrapConfig config = vaultConfigHolder.getVaultBootstrapConfig();
-        this.webClient = createHttpClient(vertx, config, tlsConfig);
-        this.baseUrl = config.url.orElseThrow(new Supplier<VaultException>() {
-            @Override
-            public VaultException get() {
-                return new VaultException("no vault url provided");
-            }
-        });
+    public void init(ConfigSourceContext context) {
+        this.context = context;
+        this.webClient = createHttpClient(vertx, context, tlsConfig);
+        String urlValue = VaultConfigSourceFactory.getUrlFromConfig(context);
+        try {
+            this.baseUrl = new URL(urlValue);
+        } catch (MalformedURLException e) {
+            throw new VaultException("invalid vault url " + urlValue);
+        }
     }
 
     @PreDestroy
@@ -218,7 +217,7 @@ public class VertxVaultClient implements VaultClient {
     }
 
     private Duration getRequestTimeout() {
-        return vaultConfigHolder.getVaultBootstrapConfig().readTimeout;
+        return VaultConfigSourceFactory.getDurationFromConfig(context, "quarkus.vault.read-timeout", DEFAULT_READ_TIMEOUT);
     }
 
     private int exec(HttpRequest<Buffer> request) {
@@ -240,7 +239,9 @@ public class VertxVaultClient implements VaultClient {
         if (token != null) {
             request.putHeader(X_VAULT_TOKEN, token);
         }
-        Optional<String> namespace = vaultConfigHolder.getVaultBootstrapConfig().enterprise.namespace;
+
+        Optional<String> namespace = Optional
+                .ofNullable(VaultConfigSourceFactory.getValueFromConfig(context, "quarkus.vault.enterprise.namespace", null));
         if (namespace.isPresent() && !isRootNamespaceAPI(path)) {
             request.putHeader(X_VAULT_NAMESPACE, namespace.get());
         }

@@ -1,15 +1,22 @@
 package io.quarkus.vault.runtime.config;
 
+import static io.quarkus.vault.runtime.config.VaultBootstrapConfig.DEFAULT_CONFIG_ORDINAL;
+import static io.quarkus.vault.runtime.config.VaultBootstrapConfig.DEFAULT_SECRET_CONFIG_CACHE_PERIOD;
 import static io.quarkus.vault.runtime.config.VaultCacheEntry.tryReturnLastKnownValue;
+import static io.quarkus.vault.runtime.config.VaultConfigSourceFactory.getDurationFromConfig;
+import static io.quarkus.vault.runtime.config.VaultConfigSourceFactory.getIntegerFromConfig;
 import static java.util.Collections.emptyMap;
 import static java.util.stream.Collectors.toMap;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logging.Logger;
@@ -18,6 +25,7 @@ import io.quarkus.arc.Arc;
 import io.quarkus.vault.VaultException;
 import io.quarkus.vault.VaultKVSecretEngine;
 import io.quarkus.vault.runtime.VaultIOException;
+import io.smallrye.config.ConfigSourceContext;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 
 public class VaultConfigSource implements ConfigSource {
@@ -25,11 +33,16 @@ public class VaultConfigSource implements ConfigSource {
     private static final Logger log = Logger.getLogger(VaultConfigSource.class);
 
     private AtomicReference<VaultCacheEntry<Map<String, String>>> cache = new AtomicReference<>(null);
-    private VaultBootstrapConfig vaultBootstrapConfig;
+    // private VaultBootstrapConfig vaultBootstrapConfig;
     private volatile boolean firstTime = true;
+    private ConfigSourceContext context;
 
-    public VaultConfigSource(VaultBootstrapConfig vaultBootstrapConfig) {
-        this.vaultBootstrapConfig = vaultBootstrapConfig;
+    //    public VaultConfigSource(VaultBootstrapConfig vaultBootstrapConfig) {
+    //        this.vaultBootstrapConfig = vaultBootstrapConfig;
+    //    }
+
+    public VaultConfigSource(ConfigSourceContext context) {
+        this.context = context;
     }
 
     @Override
@@ -39,7 +52,8 @@ public class VaultConfigSource implements ConfigSource {
 
     @Override
     public int getOrdinal() {
-        return vaultBootstrapConfig.configOrdinal;
+        return Integer.parseInt(Optional.ofNullable(context.getValue("quarkus.vault.config-ordinal").getValue())
+                .orElse(DEFAULT_CONFIG_ORDINAL));
     }
 
     /**
@@ -59,13 +73,14 @@ public class VaultConfigSource implements ConfigSource {
 
     @Override
     public String getValue(String propertyName) {
-        return vaultBootstrapConfig.url.isPresent() ? getSecretConfig().get(propertyName) : null;
+        return getSecretConfig().get(propertyName);
     }
 
     private Map<String, String> getSecretConfig() {
 
         VaultCacheEntry<Map<String, String>> cacheEntry = cache.get();
-        if (cacheEntry != null && cacheEntry.youngerThan(vaultBootstrapConfig.secretConfigCachePeriod)) {
+        if (cacheEntry != null && cacheEntry.youngerThan(getDurationFromConfig(context,
+                "quarkus.vault.secret-config-cache-period", DEFAULT_SECRET_CONFIG_CACHE_PERIOD))) {
             return cacheEntry.getValue();
         }
 
@@ -77,7 +92,7 @@ public class VaultConfigSource implements ConfigSource {
         Map<String, String> properties = new HashMap<>();
 
         if (firstTime) {
-            log.debug("fetch secrets first time with attempts = " + vaultBootstrapConfig.mpConfigInitialAttempts);
+            log.debug("fetch secrets first time with attempts = " + getMPConfigInitialAttempts());
             fetchSecretsFirstTime(properties);
             firstTime = false;
         } else {
@@ -93,9 +108,13 @@ public class VaultConfigSource implements ConfigSource {
         return properties;
     }
 
+    private int getMPConfigInitialAttempts() {
+        return getIntegerFromConfig(context, "quarkus.vault.mp-config-initial-attempts", 1);
+    }
+
     private void fetchSecretsFirstTime(Map<String, String> properties) {
         VaultIOException last = null;
-        for (int i = 0; i < vaultBootstrapConfig.mpConfigInitialAttempts; i++) {
+        for (int i = 0; i < getMPConfigInitialAttempts(); i++) {
             try {
                 if (i > 0) {
                     log.debug("retrying to fetch secrets");
@@ -116,11 +135,16 @@ public class VaultConfigSource implements ConfigSource {
     }
 
     private void fetchSecrets(Map<String, String> properties) {
+
         // default kv paths
-        vaultBootstrapConfig.secretConfigKvPath.ifPresent(strings -> fetchSecrets(strings, null, properties));
+        List<String> secretConfigKvPath = Arrays.stream(
+                VaultConfigSourceFactory.getValueFromConfig(context, "quarkus.vault.secret-config-kv-path", "").split(","))
+                .map(String::trim).collect(Collectors.toList());
+        fetchSecrets(secretConfigKvPath, null, properties);
 
         // prefixed kv paths
-        vaultBootstrapConfig.secretConfigKvPathPrefix.forEach((key, value) -> fetchSecrets(value.paths, key, properties));
+        // TODO factory
+        // vaultBootstrapConfig.secretConfigKvPathPrefix.forEach((key, value) -> fetchSecrets(value.paths, key, properties));
     }
 
     private void fetchSecrets(List<String> paths, String prefix, Map<String, String> properties) {

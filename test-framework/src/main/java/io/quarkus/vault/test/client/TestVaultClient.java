@@ -1,8 +1,15 @@
 package io.quarkus.vault.test.client;
 
-import io.quarkus.arc.Arc;
+import static io.quarkus.vault.runtime.config.VaultBootstrapConfig.DEFAULT_CONFIG_ORDINAL;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
 import io.quarkus.runtime.TlsConfig;
-import io.quarkus.vault.runtime.VaultConfigHolder;
 import io.quarkus.vault.runtime.client.VertxVaultClient;
 import io.quarkus.vault.runtime.client.dto.transit.VaultTransitRandomBody;
 import io.quarkus.vault.test.client.dto.VaultAppRoleRoleId;
@@ -10,20 +17,55 @@ import io.quarkus.vault.test.client.dto.VaultAppRoleSecretId;
 import io.quarkus.vault.test.client.dto.VaultTransitHash;
 import io.quarkus.vault.test.client.dto.VaultTransitHashBody;
 import io.quarkus.vault.test.client.dto.VaultTransitRandom;
+import io.smallrye.config.ConfigSourceContext;
+import io.smallrye.config.ConfigValue;
 
 public class TestVaultClient extends VertxVaultClient {
 
-    private static VaultConfigHolder getConfigHolder() {
-        return Arc.container().instance(VaultConfigHolder.class).get();
-    }
+    //    private static VaultConfigHolder getConfigHolder() {
+    //        return Arc.container().instance(VaultConfigHolder.class).get();
+    //    }
+    //
+    //    public TestVaultClient() {
+    //        this(getConfigHolder());
+    //    }
+    //
+    //    public TestVaultClient(VaultConfigHolder configHolder) {
+    //        super(configHolder, new TlsConfig());
+    //        init();
+    //    }
 
     public TestVaultClient() {
-        this(getConfigHolder());
+        this(new HashMap<>());
     }
 
-    public TestVaultClient(VaultConfigHolder configHolder) {
-        super(configHolder, new TlsConfig());
-        init();
+    public TestVaultClient(Map<String, String> map) {
+        super(new TlsConfig());
+        init(createContext(map));
+    }
+
+    private static ConfigSourceContext createContext(Map<String, String> map) {
+        return new ConfigSourceContext() {
+            @Override
+            public io.smallrye.config.ConfigValue getValue(String name) {
+                return ConfigValue.builder()
+                        .withConfigSourceName("test")
+                        .withName(name)
+                        .withValue(map.get(name))
+                        .withConfigSourceOrdinal(Integer.parseInt(DEFAULT_CONFIG_ORDINAL))
+                        .build();
+            }
+
+            @Override
+            public List<String> getProfiles() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public Iterator<String> iterateNames() {
+                return new ArrayList<>(map.keySet()).iterator();
+            }
+        };
     }
 
     public VaultAppRoleSecretId generateAppRoleSecretId(String token, String roleName) {

@@ -21,7 +21,7 @@ import io.quarkus.runtime.annotations.ConfigPhase;
 import io.quarkus.runtime.annotations.ConfigRoot;
 import io.quarkus.vault.runtime.LogConfidentialityLevel;
 
-@ConfigRoot(name = VaultBootstrapConfig.NAME, phase = ConfigPhase.BOOTSTRAP)
+@ConfigRoot(name = VaultBootstrapConfig.NAME, phase = ConfigPhase.RUN_TIME)
 public class VaultBootstrapConfig {
 
     public static final String NAME = "vault";

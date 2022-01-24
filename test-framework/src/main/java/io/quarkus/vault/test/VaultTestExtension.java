@@ -24,7 +24,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -47,7 +46,6 @@ import org.testcontainers.containers.output.OutputFrame;
 
 import io.quarkus.vault.VaultException;
 import io.quarkus.vault.VaultKVSecretEngine;
-import io.quarkus.vault.runtime.VaultConfigHolder;
 import io.quarkus.vault.runtime.VaultIOException;
 import io.quarkus.vault.runtime.VaultVersions;
 import io.quarkus.vault.runtime.client.VaultClientException;
@@ -55,11 +53,6 @@ import io.quarkus.vault.runtime.client.backend.VaultInternalSystemBackend;
 import io.quarkus.vault.runtime.client.dto.sys.VaultInitResponse;
 import io.quarkus.vault.runtime.client.dto.sys.VaultPolicyBody;
 import io.quarkus.vault.runtime.client.dto.sys.VaultSealStatusResult;
-import io.quarkus.vault.runtime.config.VaultAuthenticationConfig;
-import io.quarkus.vault.runtime.config.VaultBootstrapConfig;
-import io.quarkus.vault.runtime.config.VaultEnterpriseConfig;
-import io.quarkus.vault.runtime.config.VaultKubernetesAuthenticationConfig;
-import io.quarkus.vault.runtime.config.VaultTlsConfig;
 import io.quarkus.vault.test.client.TestVaultClient;
 
 public class VaultTestExtension {
@@ -175,19 +168,27 @@ public class VaultTestExtension {
     }
 
     private TestVaultClient createVaultClient() {
-        VaultBootstrapConfig vaultBootstrapConfig = new VaultBootstrapConfig();
-        vaultBootstrapConfig.tls = new VaultTlsConfig();
-        vaultBootstrapConfig.url = getVaultUrl();
-        vaultBootstrapConfig.enterprise = new VaultEnterpriseConfig();
-        vaultBootstrapConfig.enterprise.namespace = Optional.empty();
-        vaultBootstrapConfig.tls.skipVerify = Optional.of(true);
-        vaultBootstrapConfig.tls.caCert = Optional.empty();
-        vaultBootstrapConfig.connectTimeout = Duration.ofSeconds(5);
-        vaultBootstrapConfig.readTimeout = Duration.ofSeconds(1);
-        vaultBootstrapConfig.nonProxyHosts = Optional.empty();
-        vaultBootstrapConfig.authentication = new VaultAuthenticationConfig();
-        vaultBootstrapConfig.authentication.kubernetes = new VaultKubernetesAuthenticationConfig();
-        return new TestVaultClient(new VaultConfigHolder().setVaultBootstrapConfig(vaultBootstrapConfig));
+        // TODO factory
+        //        VaultBootstrapConfig vaultBootstrapConfig = new VaultBootstrapConfig();
+        //        vaultBootstrapConfig.tls = new VaultTlsConfig();
+        //        vaultBootstrapConfig.url = getVaultUrl();
+        //        vaultBootstrapConfig.enterprise = new VaultEnterpriseConfig();
+        //        vaultBootstrapConfig.enterprise.namespace = Optional.empty();
+        //        vaultBootstrapConfig.tls.skipVerify = Optional.of(true);
+        //        vaultBootstrapConfig.tls.caCert = Optional.empty();
+        //        vaultBootstrapConfig.connectTimeout = Duration.ofSeconds(5);
+        //        vaultBootstrapConfig.readTimeout = Duration.ofSeconds(1);
+        //        vaultBootstrapConfig.nonProxyHosts = Optional.empty();
+        //        vaultBootstrapConfig.authentication = new VaultAuthenticationConfig();
+        //        vaultBootstrapConfig.authentication.kubernetes = new VaultKubernetesAuthenticationConfig();
+
+        Map<String, String> map = new HashMap<>();
+        map.put("quarkus.vault.url", VAULT_URL);
+        map.put("quarkus.vault.tls.skip-verify", "true");
+        map.put("quarkus.vault.connect-timeout", "5S");
+        map.put("quarkus.vault.read-timeout", "1S");
+
+        return new TestVaultClient(map);
     }
 
     private static Optional<URL> getVaultUrl() {

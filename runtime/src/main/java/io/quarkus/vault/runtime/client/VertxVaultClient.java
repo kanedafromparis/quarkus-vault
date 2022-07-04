@@ -14,10 +14,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Singleton;
+
+import org.jboss.logging.Logger;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -42,6 +45,7 @@ import io.vertx.mutiny.ext.web.client.WebClient;
 @Singleton
 public class VertxVaultClient implements VaultClient {
 
+    private static final Logger log = Logger.getLogger(VertxVaultClient.class.getName());
     private static final HttpMethod LIST = HttpMethod.valueOf("LIST");
 
     private static final List<String> ROOT_NAMESPACE_API = Arrays.asList("sys/init", "sys/license", "sys/leader", "sys/health",
@@ -61,6 +65,9 @@ public class VertxVaultClient implements VaultClient {
         this.mapper.configure(FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         this.vertx = createVertxInstance();
+        if (log.isDebugEnabled()) {
+            log.debug("VertxVaultClient :" + this.toString());
+        }
     }
 
     private Vertx createVertxInstance() {
@@ -207,8 +214,12 @@ public class VertxVaultClient implements VaultClient {
             }
             Buffer responseBuffer = response.body();
             if (responseBuffer != null) {
+                //@Todo clean sensitive info
+                log.debug("body:" + responseBuffer.toString());
                 return resultClass == null ? null : mapper.readValue(responseBuffer.toString(), resultClass);
             } else {
+                //@Todo clean sensitive info
+                log.debug("body:null");
                 return null;
             }
 
@@ -260,12 +271,15 @@ public class VertxVaultClient implements VaultClient {
 
     private HttpRequest<Buffer> builder(String path, String token) {
         HttpRequest<Buffer> request = builder(path);
+        //Path is log via getURL // log.debug("path : "+path);
         if (token != null) {
             request.putHeader(X_VAULT_TOKEN, token);
+            log.debug("Add Header : " + X_VAULT_TOKEN + " : xxx");
         }
         Optional<String> namespace = vaultConfigHolder.getVaultBootstrapConfig().enterprise.namespace;
         if (namespace.isPresent() && !isRootNamespaceAPI(path)) {
             request.putHeader(X_VAULT_NAMESPACE, namespace.get());
+            log.debug("Add Header : " + X_VAULT_NAMESPACE + " : " + namespace.get());
         }
         return request;
     }
@@ -282,6 +296,12 @@ public class VertxVaultClient implements VaultClient {
         HttpRequest<Buffer> request = builder(path);
         if (queryParams != null) {
             queryParams.forEach(request::addQueryParam);
+            queryParams.forEach(new BiConsumer<String, String>() {
+                @Override
+                public void accept(String s1, String s2) {
+                    log.debug("add : " + s1 + " with " + s2);
+                }
+            });
         }
         return request;
     }
@@ -296,7 +316,11 @@ public class VertxVaultClient implements VaultClient {
 
     private URL getUrl(String path) {
         try {
-            return new URL(baseUrl, API_VERSION + "/" + path);
+            URL url = new URL(baseUrl, API_VERSION + "/" + path);
+            if (log.isDebugEnabled()) {
+                log.debug("Call URL :" + url.toExternalForm());
+            }
+            return url;
         } catch (MalformedURLException e) {
             throw new VaultException(e);
         }

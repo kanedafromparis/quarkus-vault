@@ -8,7 +8,8 @@ import io.quarkus.test.junit.QuarkusIntegrationTest;
 import io.quarkus.vault.test.VaultTestLifecycleManager;
 
 @QuarkusIntegrationTest
-@DisabledOnOs(OS.WINDOWS) // https://github.com/quarkusio/quarkus/issues/3796
+//see TLS availability in native mode https://github.com/quarkusio/quarkus/issues/3797
+@DisabledOnOs(value = { OS.WINDOWS, OS.MAC })
 @QuarkusTestResource(VaultTestLifecycleManager.class)
 public class VaultInGraalITCase extends VaultTest {
 

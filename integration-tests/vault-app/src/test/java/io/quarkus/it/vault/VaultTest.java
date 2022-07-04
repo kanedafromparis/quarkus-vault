@@ -14,7 +14,7 @@ import io.restassured.RestAssured;
 
 @QuarkusTest
 @DisabledOnOs(OS.WINDOWS) // https://github.com/quarkusio/quarkus/issues/3796
-@QuarkusTestResource(VaultTestLifecycleManager.class)
+@QuarkusTestResource(value = VaultTestLifecycleManager.class)
 public class VaultTest {
 
     @Test

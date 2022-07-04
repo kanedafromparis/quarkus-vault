@@ -12,14 +12,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.testcontainers.containers.BindMode.READ_ONLY;
 import static org.testcontainers.containers.PostgreSQLContainer.POSTGRESQL_PORT;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -89,7 +84,10 @@ public class VaultTestExtension {
     static final String VAULT_POLICY = "mypolicy";
     static final String POSTGRESQL_HOST = "mypostgresdb";
     static final String RABBITMQ_HOST = "myrabbitmq";
-    static final String VAULT_URL = (useTls() ? "https" : "http") + "://localhost:" + VAULT_PORT;
+    //static final String VAULT_URL = (useTls() ? "https" : "http") + "://localhost:" + VAULT_PORT;
+    //@Todo have a better way to set this
+    static String VAULT_IP = System.getProperty("DOCKER_EXPOSE_IP", "localhost");
+    static String VAULT_URL = (useTls() ? "https" : "http") + "://" + VAULT_IP + ":" + VAULT_PORT;
     public static final String SECRET_KEY = "secret";
     public static final String ENCRYPTION_KEY_NAME = "my-encryption-key";
     public static final String ENCRYPTION_KEY2_NAME = "my-encryption-key2";
@@ -183,7 +181,7 @@ public class VaultTestExtension {
         vaultBootstrapConfig.tls.skipVerify = Optional.of(true);
         vaultBootstrapConfig.tls.caCert = Optional.empty();
         vaultBootstrapConfig.connectTimeout = Duration.ofSeconds(30);
-        vaultBootstrapConfig.readTimeout = Duration.ofSeconds(5);
+        vaultBootstrapConfig.readTimeout = Duration.ofSeconds(35);
         vaultBootstrapConfig.nonProxyHosts = Optional.empty();
         vaultBootstrapConfig.authentication = new VaultAuthenticationConfig();
         vaultBootstrapConfig.authentication.kubernetes = new VaultKubernetesAuthenticationConfig();
@@ -199,10 +197,7 @@ public class VaultTestExtension {
     }
 
     public void start() throws InterruptedException, IOException {
-
         log.info("start containers on " + System.getProperty("os.name"));
-
-        new File(HOST_POSTGRES_TMP_CMD).mkdirs();
 
         Network network = Network.newNetwork();
 
@@ -217,6 +212,8 @@ public class VaultTestExtension {
                 .withClasspathResourceMapping("postgres-init.sql", TMP_POSTGRES_INIT_SQL_FILE, READ_ONLY);
 
         postgresContainer.setPortBindings(Arrays.asList(MAPPED_POSTGRESQL_PORT + ":" + POSTGRESQL_PORT));
+        postgresContainer.start();
+        execPostgres(format("psql -U %s -d %s -f %s", DB_USERNAME, DB_NAME, TMP_POSTGRES_INIT_SQL_FILE));
 
         rabbitMQContainer = new RabbitMQContainer()
                 .withAdminPassword(RMQ_PASSWORD)
@@ -227,8 +224,6 @@ public class VaultTestExtension {
 
         String vaultImage = getVaultImage();
         log.info("starting " + vaultImage + " with url=" + VAULT_URL + " and config file=" + configFile);
-
-        new File(HOST_VAULT_TMP_CMD).mkdirs();
 
         vaultContainer = new GenericContainer<>(vaultImage)
                 .withExposedPorts(VAULT_PORT)
@@ -244,9 +239,6 @@ public class VaultTestExtension {
                 .withCommand("server", "-log-level=debug", "-config=" + TMP_VAULT_CONFIG_JSON_FILE);
 
         vaultContainer.setPortBindings(Arrays.asList(VAULT_PORT + ":" + VAULT_PORT));
-
-        postgresContainer.start();
-        execPostgres(format("psql -U %s -d %s -f %s", DB_USERNAME, DB_NAME, TMP_POSTGRES_INIT_SQL_FILE));
 
         rabbitMQContainer.start();
 
@@ -466,7 +458,8 @@ public class VaultTestExtension {
 
     private void waitForVaultAPIToBeReady(VaultInternalSystemBackend vaultInternalSystemBackend) throws InterruptedException {
         Instant started = Instant.now();
-        while (Instant.now().isBefore(started.plusSeconds(20))) {
+        //@TODO set that has a test parameter
+        while (Instant.now().isBefore(started.plusSeconds(60))) {
             try {
                 log.info("checking seal status");
                 VaultSealStatusResult sealStatus = vaultInternalSystemBackend.systemSealStatus();
@@ -481,21 +474,21 @@ public class VaultTestExtension {
     }
 
     private String execPostgres(String command) throws IOException, InterruptedException {
-        String[] cmd = { "/bin/sh", "-c", command + " > " + CONTAINER_TMP_CMD + OUT_FILE };
-        return exec(postgresContainer, command, cmd, HOST_POSTGRES_TMP_CMD + OUT_FILE);
+        String[] cmd = { "/bin/sh", "-c", command };//no need for output file+ " > " + CONTAINER_TMP_CMD + OUT_FILE };
+        return exec(postgresContainer, command, cmd);//, System.getProperty("user.dir") + "/" + HOST_POSTGRES_TMP_CMD + OUT_FILE);
     }
 
     private String execVault(String command) throws IOException, InterruptedException {
-        String[] cmd = createVaultCommand(command + " > " + CONTAINER_TMP_CMD + OUT_FILE);
-        return exec(vaultContainer, command, cmd, HOST_VAULT_TMP_CMD + OUT_FILE);
+        String[] cmd = createVaultCommand(command);//no need for output file + " > " + CONTAINER_TMP_CMD + OUT_FILE);
+        return exec(vaultContainer, command, cmd);//, System.getProperty("user.dir") + "/" + HOST_VAULT_TMP_CMD + OUT_FILE);
     }
 
-    private String exec(GenericContainer container, String command, String[] cmd, String outFile)
+    private String exec(GenericContainer container, String command, String[] cmd)
             throws IOException, InterruptedException {
-        exec(container, cmd);
-        String out = Files.readString(Paths.get(outFile));
-        log.info("> " + command + "\n" + out);
-        return out;
+        Container.ExecResult exec = exec(container, cmd);
+        log.info("> {\"command\":\"" + command + "\", \"out\":\"" + exec.getStdout() + "\",\"err\":\"" + exec.getStderr()
+                + "\"}");
+        return exec.getStdout();
     }
 
     private static Container.ExecResult exec(GenericContainer container, String[] cmd)
@@ -512,7 +505,8 @@ public class VaultTestExtension {
     }
 
     private String[] createVaultCommand(String command) {
-        String cmd = (rootToken != null ? "export VAULT_TOKEN=" + rootToken + " && " : "") + command;
+        String cmd = (rootToken != null ? "export VAULT_TOKEN=" + rootToken + " && " : "") +
+                (VAULT_URL != null ? "export VAULT_ADDR='" + VAULT_URL + "' && " : "") + command;
         return new String[] { "/bin/sh", "-c", cmd };
     }
 
